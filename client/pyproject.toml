@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "modelrouter-client"
+version = "0.1.0"
+description = "modelRouter 服务的 Python 客户端 SDK，供 Agent 框架接入"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.27,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/modelrouter_client"]

@@ -28,6 +28,7 @@ packages = ["src/modelrouter"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["client/src"]
 addopts = "-q"
 filterwarnings = [
   "ignore::starlette.exceptions.StarletteDeprecationWarning",
@@ -36,7 +37,7 @@ filterwarnings = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+src = ["src", "tests", "client/src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "W"]

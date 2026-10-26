@@ -121,6 +121,50 @@ curl -s --max-time 170 -X POST "$BASE/api/v1/user/recharge-orders/ORDER_NO/wait"
   -H "X-Service-Token: $TOKEN" -H "Authorization: Bearer $USER_JWT"
 ```
 
+## 接入 Agent 框架
+
+仓库自带 Python 客户端 `client/`（包名 `modelrouter-client`，只依赖 `httpx`），Agent 框架直接安装即可：
+
+```bash
+pip install "modelrouter-client @ git+https://github.com/dreamking222233/modelRouter.git@main#subdirectory=client"
+```
+
+同步用法：
+
+```python
+from modelrouter_client import ModelRouterClient, ApiError, AuthenticationError
+
+client = ModelRouterClient("http://modelrouter:8000", service_token="<SERVICE_API_TOKENS 之一>")
+
+auth = client.login("alice", "password")          # AuthResult：token、user、is_first_login、balance
+user = client.as_user(auth.token)                 # 绑定该用户的 JWT，有效期 24 小时
+
+options = user.group_options()                    # GroupOptions：series[].groups[]
+key = user.create_api_key("AI 工作台", daily_limit_usd=20)   # ApiKey.key 明文只返回一次
+
+order = user.create_recharge_order(100, "wechat")   # 自动生成幂等键，order.idempotency_key 可复用
+show_qr(order.payment_target)                       # 微信：绘制二维码；支付宝：打开 order.pay_url
+# ...用户确认已扫码后再调用等待，否则平台约 87 秒即关单
+result = user.wait_for_payment(order.order_no)      # WaitResult.paid / closed / can_wait_again
+status = user.get_recharge_order(order.order_no).status   # 非阻塞查单：pending / paid / closed / failed
+
+page = client.payments(page_size=20, status="paid")       # 代理充值记录（默认裁掉经营字段）
+```
+
+异步用法把 `ModelRouterClient` 换成 `AsyncModelRouterClient`，所有方法 `await`，其余完全一致。
+
+SDK 内置的行为：
+
+- 自动携带 `X-Service-Token`；`as_user()` 接受裸 JWT 或 `Bearer <JWT>`。
+- 创建订单不传幂等键时自动生成；对「同一幂等请求仍在处理中」的 409（带 `Retry-After`）和 429 按 `Retry-After` 自动重试，默认最多 2 次，参数冲突的 409 直接抛出。
+- 等待支付接口使用独立的 170 秒超时（`wait_timeout` 可调），其余接口 30 秒。
+- 非 2xx 响应抛 `ApiError` 子类：`AuthenticationError`(401)、`ForbiddenError`(403)、`NotFoundError`(404)、`ConflictError`(409)、`ValidationError`(400/422)、`RateLimitedError`(429)、`ServiceUnavailableError`(5xx)；`exc.code` 是字符串错误码，`exc.retry_after` 是建议重试秒数。网络问题抛 `TransportError`。
+- 每个返回对象都带 `raw` 原始字典，平台新增字段不会丢。
+
+`examples/agent_integration.py` 是一个可直接复制进框架的服务类示例，封装了登录或注册、创建模型 Key、发起充值、确认支付、查单。
+
+非 Python 框架：`docs/openapi.json` 是导出的 OpenAPI 3 文档，可用 openapi-generator 等工具生成客户端；有改动后运行 `python scripts/export_openapi.py` 重新导出。
+
 ## 错误约定
 
 错误响应的 `code` 是字符串，可直接用于程序判断。本服务自身的错误码：
@@ -174,6 +218,7 @@ Agent 框架建议这样编排：
 ## 开发
 
 ```bash
+.venv/bin/pip install -e ./client   # 本地开发时安装客户端 SDK（测试已通过 pythonpath 直接引用）
 .venv/bin/ruff check .   # 代码检查
 .venv/bin/pytest         # 单元测试（用 httpx.MockTransport 模拟平台，不依赖网络）
 ```
@@ -195,7 +240,11 @@ src/modelrouter/
     ├── auth.py          # /api/v1/auth/*
     ├── user.py          # /api/v1/user/*
     └── agent.py         # /api/v1/agent/*
+client/                  # Python 客户端 SDK（modelrouter-client）
+examples/                # Agent 框架接入示例
+docs/openapi.json        # 导出的 OpenAPI 文档
 scripts/e2e_smoke.py     # 对真实平台的冒烟联调
+scripts/export_openapi.py# 导出 OpenAPI
 tests/                   # pytest
 ```
 
