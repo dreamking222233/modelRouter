@@ -138,8 +138,20 @@ src/modelrouter/
 tests/                   # pytest
 ```
 
+### 对真实平台的冒烟联调
+
+`scripts/e2e_smoke.py` 会通过本地运行的 modelRouter 依次调用全部接口，并验证幂等、404 和本地校验。
+它会在平台上真实创建一个测试用户、一个模型 Key 和一笔 1 元未支付订单，只在联调环境使用：
+
+```bash
+.venv/bin/python scripts/e2e_smoke.py --base http://127.0.0.1:8000 --token <SERVICE_API_TOKENS 之一>
+# 加 --wait 会调用等待支付接口，阻塞约 90–120 秒，平台会在此期间关闭未支付订单
+```
+
 ## 关于平台文档的几点说明
 
 - 平台文档中模型 Key 接口用 `/user/...`，充值接口用 `/users/...`。本服务按文档原样调用，路径常量集中在 `src/modelrouter/platform/client.py` 顶部，平台修正后只需改那里。
-- 平台的等待接口在 120 秒截止前会尝试关单，因此用户扫码后超过 120 秒才付款可能失败，这时需要用新的 `Idempotency-Key` 重新下单；`wait_result=wait_timeout` 且 `order_status=pending` 时可用同一订单号继续等待。
+- 平台的等待接口在超时前会主动关单。实测未支付时约 87 秒就返回 `wait_result=closed`、`close_result=confirmed`，订单状态变为 `closed`，远早于 `expired_at` 的 30 分钟。也就是说，一旦调用了等待接口，用户必须在这段时间内完成支付，否则二维码作废，需要用新的 `Idempotency-Key` 重新下单；只有 `wait_result=wait_timeout` 且 `order_status=pending` 时才可用同一订单号继续等待。
+- 平台成功响应的 `code` 是数字 200，错误响应的 `code` 是字符串，例如 `OPEN_API_KEY_INVALID`、`IDEMPOTENCY_CONFLICT`、`REQUEST_LOG_NOT_FOUND`。Agent 框架判断结果请以 HTTP 状态码为准，不要假设 `code` 的类型。
+- 支付宝 `pay_url` 中带有 `return_url`（代理前台域名）和 `notify_url`（平台 API 域名），持有链接的人能看到这两个域名；`GET /api/v1/agent/payments` 返回的记录含 `agent_name`、`source_host`、`agent_settlement_rate`、`agent_income_cny` 等代理敏感字段，不要原样下发给终端用户。
 - 平台不提供非阻塞的单笔订单查询接口，查状态只能调等待接口。
