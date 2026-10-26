@@ -52,3 +52,52 @@ def test_payments_rejects_reversed_date_range(client, platform):
     assert resp.status_code == 400
     assert resp.json()["code"] == "INVALID_DATE_RANGE"
     assert platform.requests == []
+
+
+AGENT_ROW = {
+    "id": 3800,
+    "order_no": "WXP1",
+    "user_id": 3418,
+    "username": "alice",
+    "agent_id": 8,
+    "agent_name": "阿乐",
+    "source_host": "ale.example.com",
+    "payment_channel": "wechat",
+    "amount_cny": 1.0,
+    "credited_usd": 5.0,
+    "user_recharge_rate": 5.0,
+    "agent_settlement_rate": 7.0,
+    "agent_income_cny": 0.29,
+    "status": "pending",
+    "created_at": "2026-10-27T01:32:09+08:00",
+}
+
+
+def test_payments_default_view_strips_agent_fields(client, platform):
+    platform.respond(
+        200,
+        {"code": 200, "message": "ok", "data": {"list": [AGENT_ROW], "total": 1, "page": 1}},
+    )
+    data = client.get("/api/v1/agent/payments").json()["data"]
+    row = data["list"][0]
+    assert data["total"] == 1
+    assert row["order_no"] == "WXP1"
+    assert row["credited_usd"] == 5.0
+    for key in ("agent_name", "source_host", "agent_settlement_rate", "agent_income_cny"):
+        assert key not in row
+    assert "view" not in dict(platform.last.url.params)
+
+
+def test_payments_agent_view_keeps_everything(client, platform):
+    platform.respond(
+        200,
+        {"code": 200, "message": "ok", "data": {"list": [AGENT_ROW], "total": 1, "page": 1}},
+    )
+    row = client.get("/api/v1/agent/payments", params={"view": "agent"}).json()["data"]["list"][0]
+    assert row == AGENT_ROW
+    assert "view" not in dict(platform.last.url.params)
+
+
+def test_payments_rejects_unknown_view(client, platform):
+    assert client.get("/api/v1/agent/payments", params={"view": "all"}).status_code == 422
+    assert platform.requests == []

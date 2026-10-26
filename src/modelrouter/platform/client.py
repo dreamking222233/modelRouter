@@ -153,12 +153,10 @@ class PlatformClient:
             )
         except httpx.TimeoutException as exc:
             logger.warning("platform %s %s 超时: %s", method, path, exc.__class__.__name__)
-            raise UpstreamError(504, "平台响应超时", data={"path": path}) from exc
+            raise UpstreamError(504, "UPSTREAM_TIMEOUT", "平台响应超时") from exc
         except httpx.HTTPError as exc:
             logger.warning("platform %s %s 请求失败: %s", method, path, exc.__class__.__name__)
-            raise UpstreamError(
-                502, "无法连接平台", data={"path": path, "error": exc.__class__.__name__}
-            ) from exc
+            raise UpstreamError(502, "UPSTREAM_UNAVAILABLE", "无法连接平台") from exc
 
         elapsed_ms = (time.perf_counter() - started) * 1000
         logger.info(
@@ -171,17 +169,11 @@ class PlatformClient:
         try:
             body = response.json()
         except ValueError as exc:
-            raise UpstreamError(
-                502,
-                "平台返回了非 JSON 响应",
-                data={"path": path, "status": response.status_code},
-            ) from exc
+            logger.warning("platform %s 返回非 JSON 响应，状态 %s", path, response.status_code)
+            raise UpstreamError(502, "UPSTREAM_BAD_RESPONSE", "平台返回了非 JSON 响应") from exc
         if not isinstance(body, dict) or "code" not in body:
-            raise UpstreamError(
-                502,
-                "平台响应格式异常",
-                data={"path": path, "status": response.status_code},
-            )
+            logger.warning("platform %s 响应格式异常，状态 %s", path, response.status_code)
+            raise UpstreamError(502, "UPSTREAM_BAD_RESPONSE", "平台响应格式异常")
         headers = {
             key: value
             for key, value in response.headers.items()

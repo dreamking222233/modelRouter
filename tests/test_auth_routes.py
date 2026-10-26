@@ -44,7 +44,7 @@ def test_register_rejects_invalid_email_locally(client, platform):
     )
     assert resp.status_code == 422
     body = resp.json()
-    assert body["code"] == 422
+    assert body["code"] == "VALIDATION_ERROR"
     assert body["data"][0]["loc"] == ["body", "email"]
     assert platform.requests == []
 

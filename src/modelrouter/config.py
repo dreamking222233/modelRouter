@@ -24,7 +24,22 @@ class Settings(BaseSettings):
     # ---- 本服务 ----
     service_api_tokens: str = Field(default="", description="逗号分隔的 X-Service-Token 列表")
     service_auth_disabled: bool = Field(default=False, description="仅调试用：跳过令牌校验")
+    enable_docs: bool = Field(default=False, description="是否开放 /docs 与 /openapi.json")
     log_level: str = "INFO"
+
+    # ---- 等待支付与查单 ----
+    wait_max_concurrency: int = Field(
+        default=32, ge=1, description="本进程同时进行的等待支付请求上限，超出直接返回 429"
+    )
+    wait_retry_after_seconds: int = Field(default=5, ge=1, description="429 时建议的重试间隔")
+    order_lookup_max_pages: int = Field(
+        default=5, ge=1, le=50, description="按订单号查单时最多翻阅的充值记录页数（每页 100）"
+    )
+
+    # ---- 就绪探测 ----
+    readiness_cache_seconds: float = Field(
+        default=30.0, ge=0, description="/readyz 探测结果缓存秒数"
+    )
 
     @property
     def platform_open_api_base(self) -> str:

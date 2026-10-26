@@ -14,4 +14,7 @@ EXPOSE 8000
 
 # 等待支付接口会同步阻塞最长 150 秒，uvicorn 本身不会杀掉长请求；
 # 若前置 Nginx/网关，请把读取超时设为 160 秒以上。
-CMD ["uvicorn", "modelrouter.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+# 访问日志由本服务的中间件输出，关闭 uvicorn 自带的；同时不暴露 Server 头。
+CMD ["uvicorn", "modelrouter.main:create_app", "--factory", \
+     "--host", "0.0.0.0", "--port", "8000", \
+     "--no-access-log", "--no-server-header"]

@@ -12,7 +12,7 @@ def test_missing_service_token_is_rejected_before_calling_platform(client, platf
     client.headers.pop("X-Service-Token")
     resp = client.post("/api/v1/auth/login", json={"username": "a", "password": "b"})
     assert resp.status_code == 401
-    assert resp.json()["code"] == 401
+    assert resp.json()["code"] == "SERVICE_TOKEN_MISSING"
     assert platform.requests == []
 
 
@@ -20,6 +20,7 @@ def test_wrong_service_token_is_rejected(client, platform):
     client.headers["X-Service-Token"] = "nope"
     resp = client.post("/api/v1/auth/login", json={"username": "a", "password": "b"})
     assert resp.status_code == 401
+    assert resp.json()["code"] == "SERVICE_TOKEN_INVALID"
     assert platform.requests == []
 
 
@@ -65,7 +66,7 @@ def test_unknown_path_uses_envelope(client: TestClient):
     assert resp.status_code == 404
     body = resp.json()
     assert set(body) == {"code", "message", "data"}
-    assert body["code"] == 404
+    assert body["code"] == "NOT_FOUND"
 
 
 def test_responses_are_not_cacheable_and_carry_request_id(client: TestClient, platform):
@@ -75,5 +76,30 @@ def test_responses_are_not_cacheable_and_carry_request_id(client: TestClient, pl
         headers={"X-Request-ID": "rid-123"},
     )
     assert resp.headers["Cache-Control"] == "no-store"
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
     assert resp.headers["X-Request-ID"] == "rid-123"
     assert isinstance(platform, FakePlatform)
+
+
+def test_malformed_request_id_is_replaced(client: TestClient):
+    resp = client.get("/healthz", headers={"X-Request-ID": "bad id <script>"})
+    rid = resp.headers["X-Request-ID"]
+    assert rid != "bad id <script>"
+    assert len(rid) == 32
+
+    resp = client.get("/healthz", headers={"X-Request-ID": "x" * 200})
+    assert len(resp.headers["X-Request-ID"]) == 32
+
+
+def test_docs_are_disabled_by_default(client: TestClient):
+    assert client.get("/docs").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
+
+
+def test_docs_can_be_enabled(platform):
+    settings = make_settings(enable_docs=True)
+    app = create_app(settings, platform_transport=httpx.MockTransport(platform.handler))
+    with TestClient(app) as client:
+        assert client.get("/docs").status_code == 200
+        paths = client.get("/openapi.json").json()["paths"]
+    assert "/api/v1/user/recharge-orders/{order_no}" in paths

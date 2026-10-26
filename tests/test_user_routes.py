@@ -11,7 +11,7 @@ IDEM = {"Idempotency-Key": "desktop-order-0001"}
 def test_user_routes_require_bearer_jwt(client, platform):
     resp = client.get("/api/v1/user/api-keys/group-options")
     assert resp.status_code == 401
-    assert "Authorization" in resp.json()["message"]
+    assert resp.json()["code"] == "USER_TOKEN_MISSING"
     assert platform.requests == []
 
 
@@ -20,6 +20,7 @@ def test_malformed_authorization_is_rejected(client, platform):
         "/api/v1/user/api-keys/group-options", headers={"Authorization": "Token abc"}
     )
     assert resp.status_code == 401
+    assert resp.json()["code"] == "USER_TOKEN_MALFORMED"
     assert platform.requests == []
 
 
@@ -31,6 +32,60 @@ def test_group_options_forwards_jwt(client, platform, user_headers):
     assert platform.last.method == "GET"
     assert str(platform.last.url) == f"{OPEN_API_BASE}/user/api-keys/group-options"
     assert platform.last.headers["Authorization"] == f"Bearer {USER_JWT}"
+
+
+def test_group_options_strips_internal_stats(client, platform, user_headers):
+    group = {
+        "id": 2,
+        "model_series": "gpt",
+        "model_series_label": "GPT",
+        "code": "default",
+        "name": "GPT默认",
+        "multiplier": 1.0,
+        "enabled": 1,
+        "is_default": 1,
+        "sort_order": 100,
+        "description": None,
+        "mapping_count": 8,
+        "key_count": 28,
+        "created_at": "2026-09-26T23:30:02",
+        "updated_at": "2026-09-26T23:59:42",
+    }
+    series = {"value": "gpt", "label": "GPT", "default_group_id": 2, "groups": [group]}
+    platform.respond(
+        200,
+        {
+            "code": 200,
+            "message": "ok",
+            "data": {
+                "series": [series],
+                "model_series": [series],
+                "groups": [group],
+                "groups_by_series": {"gpt": [group]},
+            },
+        },
+    )
+    data = client.get("/api/v1/user/api-keys/group-options", headers=user_headers).json()["data"]
+    assert set(data) == {"series", "model_series", "groups", "groups_by_series"}
+    assert set(data["series"][0]) == {"value", "label", "default_group_id", "groups"}
+    for projected in (
+        data["series"][0]["groups"][0],
+        data["model_series"][0]["groups"][0],
+        data["groups"][0],
+        data["groups_by_series"]["gpt"][0],
+    ):
+        assert "key_count" not in projected
+        assert "mapping_count" not in projected
+        assert "created_at" not in projected
+        assert projected["id"] == 2
+        assert projected["multiplier"] == 1.0
+
+
+def test_group_options_error_is_not_projected(client, platform, user_headers):
+    platform.respond(403, {"code": "SCOPE_DENIED", "message": "no scope", "data": {"x": 1}})
+    resp = client.get("/api/v1/user/api-keys/group-options", headers=user_headers)
+    assert resp.status_code == 403
+    assert resp.json()["data"] == {"x": 1}
 
 
 def test_create_api_key_special_requires_series_and_group(client, platform, user_headers):
@@ -87,7 +142,7 @@ def test_create_api_key_unified_omits_group_fields(client, platform, user_header
 def test_create_order_requires_idempotency_key(client, platform, user_headers):
     resp = client.post("/api/v1/user/recharge-orders", json=ORDER_BODY, headers=user_headers)
     assert resp.status_code == 400
-    assert "Idempotency-Key" in resp.json()["message"]
+    assert resp.json()["code"] == "IDEMPOTENCY_KEY_MISSING"
     assert platform.requests == []
 
 
@@ -98,6 +153,7 @@ def test_create_order_validates_idempotency_key_format(client, platform, user_he
         headers={**user_headers, "Idempotency-Key": "short"},
     )
     assert resp.status_code == 400
+    assert resp.json()["code"] == "IDEMPOTENCY_KEY_INVALID"
     assert platform.requests == []
 
 
@@ -186,7 +242,7 @@ def test_platform_timeout_becomes_504(client, platform, user_headers):
     platform.responder = responder
     resp = client.post("/api/v1/user/recharge-orders/R1/wait", headers=user_headers)
     assert resp.status_code == 504
-    assert resp.json()["code"] == 504
+    assert resp.json() == {"code": "UPSTREAM_TIMEOUT", "message": "平台响应超时", "data": None}
 
 
 def test_platform_connection_error_becomes_502(client, platform, user_headers):
@@ -196,11 +252,14 @@ def test_platform_connection_error_becomes_502(client, platform, user_headers):
     platform.responder = responder
     resp = client.get("/api/v1/user/api-keys/group-options", headers=user_headers)
     assert resp.status_code == 502
-    assert resp.json()["data"]["error"] == "ConnectError"
+    assert resp.json() == {"code": "UPSTREAM_UNAVAILABLE", "message": "无法连接平台", "data": None}
 
 
 def test_non_json_platform_response_becomes_502(client, platform, user_headers):
     platform.responder = lambda _: httpx.Response(502, text="<html>bad gateway</html>")
     resp = client.get("/api/v1/user/api-keys/group-options", headers=user_headers)
     assert resp.status_code == 502
-    assert resp.json()["data"]["status"] == 502
+    body = resp.json()
+    assert body["code"] == "UPSTREAM_BAD_RESPONSE"
+    assert body["data"] is None
+    assert "html" not in body["message"]
