@@ -15,6 +15,8 @@ Agent 框架  ──X-Service-Token──▶  modelRouter  ──X-Agent-API-Key
 - 本服务无状态，不存储用户 JWT、订单或任何业务数据。
 - 响应体与平台保持一致：`{"code": ..., "message": ..., "data": ...}`。成功时 `code` 为 200，错误时 `code` 为字符串错误码；平台的 HTTP 状态码和 `Retry-After` 头原样透传。
 
+完整的项目总结与部署指南见 [docs/project-summary.md](docs/project-summary.md)。
+
 ## 快速开始
 
 ```bash
